@@ -5,32 +5,34 @@ name: Deploy to GitHub Pages
 # sends permissive CORS headers, so the browser reaches them directly and there
 # is no backend to deploy. Only shortened Google/Apple links need `npm start`.
 #
-# This publishes `public/` to a `gh-pages` branch with plain git, rather than
-# using the configure-pages/deploy-pages actions. Those need a Pages site that
-# is already set to build from "GitHub Actions", plus OIDC id-token permission,
-# and they fail the whole run when either is missing. Pushing a branch needs
-# only `contents: write` and works on every account type.
+# GitHub Pages can be fed two different ways and they are not interchangeable:
 #
-# Repository setting this expects:
-#   Settings → Pages → Build and deployment
-#     Source: Deploy from a branch
-#     Branch: gh-pages   /(root)
+#   Source: "Deploy from a branch"  -> serves a branch; needs `gh-pages` pushed
+#   Source: "GitHub Actions"        -> serves a workflow artifact; needs the
+#                                      configure/upload/deploy action trio
+#
+# Publishing only one of them silently serves nothing when the repository is set
+# to the other. So this does both. The Actions path is allowed to fail without
+# failing the run, because it errors out whenever the repository is *not* set to
+# "GitHub Actions" — which is expected, not a problem.
+#
+# Once you know which source the repository uses, the other job can be deleted.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # ---- Source: "Deploy from a branch" (Branch: gh-pages, folder: /root) ----
+  publish-branch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -50,9 +52,35 @@ jobs:
           git commit -q -m "Publish ${GITHUB_SHA:0:7}"
 
           # Force-push: gh-pages is a generated artefact, not a history worth
-          # preserving, and this keeps the branch from growing without bound.
+          # keeping, and this stops the branch growing without bound.
           git push -f \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             gh-pages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---- Source: "GitHub Actions" ----
+  publish-actions:
+    runs-on: ubuntu-latest
+    # Expected to fail when the repository serves Pages from a branch instead.
+    continue-on-error: true
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
