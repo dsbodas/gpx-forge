@@ -218,10 +218,14 @@
     <div class="field">
       <label for="elev-provider">Elevation source</label>
       <select id="elev-provider">
+        <option value="terrarium">Terrain tiles — AWS open data (~30 m)</option>
         <option value="openmeteo">Open-Meteo — Copernicus DEM (90 m)</option>
         <option value="opentopo">OpenTopoData — SRTM/ASTER (30 m)</option>
       </select>
-      <p class="muted small">Used when the routing engine does not supply elevation itself.</p>
+      <p class="muted small">Used when the routing engine does not supply elevation itself.
+        Terrain tiles are the most reliable: a whole route costs a few tile downloads
+        rather than dozens of API calls, so there is no rate limit to hit.
+        OpenTopoData works only when you run the local server.</p>
     </div>
 
     <h3>Analysis tuning</h3>

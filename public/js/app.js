@@ -52,7 +52,7 @@ function loadSettings() {
     orsKey: '',
     engine: 'brouter',
     profile: 'trekking',
-    elevationProvider: 'openmeteo',
+    elevationProvider: 'terrarium',
     device: 'universal',
     units: 'metric',
     smoothWindow: ANALYSIS_DEFAULTS.smoothWindow,

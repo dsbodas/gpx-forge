@@ -20,13 +20,10 @@ needs — BRouter, OSRM, Open-Meteo, Overpass, Nominatim, OpenRouteService — s
 permissive CORS headers, so the browser talks to them directly and there is no
 backend to run or pay for.
 
-Two things only the local server can do:
-
-- **expand shortened links** (`maps.app.goo.gl/…`), because following the
-  redirect is blocked cross-origin. Open the short link in a browser and paste
-  the full URL from the address bar instead.
-- **fall back to OpenTopoData** for elevation, which sends no CORS header. The
-  primary source (Open-Meteo) works fine.
+One thing only the local server can do: **expand shortened links**
+(`maps.app.goo.gl/…`), because following that redirect is blocked cross-origin.
+Open the short link in a browser and paste the full URL from the address bar
+instead. Full Google and Apple URLs work everywhere.
 
 ## Running it locally
 
@@ -39,7 +36,7 @@ npm start
 ```
 
 Then open **http://localhost:8787**. This gets you short-link expansion, the
-elevation fallback, and server-side caching of repeated lookups.
+OpenTopoData elevation source, and server-side caching of repeated lookups.
 
 To test from your phone on the same Wi-Fi, run the server and visit
 `http://<your-machine-ip>:8787` (`ipconfig getifaddr en0` on macOS).
@@ -255,9 +252,17 @@ browser and is never logged.
 
 ## Credits and limits
 
-Map data © OpenStreetMap contributors. Elevation from Copernicus DEM (via
-Open-Meteo) and SRTM/ASTER (via OpenTopoData). Routing by BRouter, FOSSGIS OSRM
-and OpenRouteService. Tiles from CyclOSM, OpenStreetMap and OpenTopoMap.
+Map data © OpenStreetMap contributors. Elevation from Mapzen terrain tiles
+(AWS Open Data), Copernicus DEM (via Open-Meteo) and SRTM/ASTER (via
+OpenTopoData). Routing by BRouter, FOSSGIS OSRM and OpenRouteService. Tiles from
+CyclOSM, OpenStreetMap and OpenTopoMap.
+
+Elevation defaults to **terrain tiles**, which is both the most accurate source
+available without a key and the only one with no meaningful rate limit — a whole
+route costs a few tile downloads rather than dozens of per-point API calls, and
+tiles are cached, so editing a route re-analyses instantly. Checked against
+BRouter's own SRTM data over the same 918-point geometry it agrees to a mean of
+5.5 m per point, giving 1,124 m of ascent against BRouter's 1,114 m.
 
 These are free, donated services with rate limits. The app paces its requests and
 backs off when throttled, but a very long route analysed repeatedly may need a
