@@ -303,14 +303,50 @@ function bindEvents() {
 
   $('settings-btn').addEventListener('click', () => $('settings-dialog').showModal());
   $('settings-dialog').addEventListener('close', () => {
+    const hadKey = Boolean(settings.orsKey);
     settings.orsKey = $('ors-key').value.trim();
     settings.elevationProvider = $('elev-provider').value;
     settings.smoothWindow = clampNum($('set-smooth').value, 0, 500, ANALYSIS_DEFAULTS.smoothWindow);
     settings.ascentThreshold = clampNum($('set-threshold').value, 0, 30, ANALYSIS_DEFAULTS.ascentThreshold);
     settings.minClimbGain = clampNum($('set-mingain').value, 5, 500, ANALYSIS_DEFAULTS.minClimbGain);
     settings.minClimbGrade = clampNum($('set-mingrade').value, 0.5, 15, ANALYSIS_DEFAULTS.minClimbGrade * 100);
+    // Adding a key is only ever done in order to use OpenRouteService, so
+    // switch to it rather than leaving the key inert behind a dropdown the
+    // user then has to find. Freely reversible from the engine selector.
+    // Catch a mis-paste now rather than as a puzzling 403 halfway through a
+    // route. Current ORS keys are a base64 JWT ("eyJ…"); older ones are 40 hex
+    // characters. A warning only — the format is theirs to change, not ours.
+    const keyLooksValid =
+      !settings.orsKey ||
+      /^eyJ[\w-]/.test(settings.orsKey) ||
+      /^[0-9a-f]{32,64}$/i.test(settings.orsKey);
+
+    const keyJustAdded = !hadKey && Boolean(settings.orsKey);
+    if (keyJustAdded && settings.engine !== 'ors') {
+      settings.engine = 'ors';
+      settings.profile = defaultProfile('ors');
+      $('engine-select').value = 'ors';
+    }
+
     saveSettings();
     syncProfileSelect();
+
+    if (!keyLooksValid) {
+      // Takes precedence over the success message — a single toast slot, and
+      // this is the one the user needs to act on.
+      toast('That does not look like an OpenRouteService key — check for a stray space or a partial copy.', 'error');
+    } else if (keyJustAdded) {
+      toast(
+        state.waypoints.length >= 2
+          ? 'Key saved — switched to OpenRouteService. Re-routing to pick up surface data…'
+          : 'Key saved — switched to OpenRouteService for the best cycling profiles.',
+        'ok'
+      );
+      // ORS returns surface and road type with the route, so a re-route now
+      // fills in the surface card for free.
+      if (state.waypoints.length >= 2 && !state.isFullGeometry) { rebuildRoute(); return; }
+    }
+
     if (state.routePoints.length) reanalyse();
   });
   $('settings-reset').addEventListener('click', () => {
