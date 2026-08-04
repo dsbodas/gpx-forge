@@ -44,6 +44,18 @@ function loadConfig() {
     // is a much harder thing to debug than a clear "not configured yet".
     const isPlaceholder = (v) => !v || /^(paste|your|xxx|<|1234)/i.test(v);
     if (!isPlaceholder(id) && !isPlaceholder(secret)) {
+      // Strava client IDs are integers. A stray character copied along with the
+      // value gets a bare HTTP 400 from Strava's authorize endpoint with no
+      // explanation, so say something useful here instead.
+      if (!/^[0-9]+$/.test(id)) {
+        console.warn(
+          `\n  ⚠ Strava clientId "${id}" is not numeric. Strava will reject it with a 400.` +
+          `\n    Check strava.config.json for a stray character.\n`
+        );
+      }
+      if (!/^[0-9a-f]{40}$/i.test(secret)) {
+        console.warn('\n  ⚠ Strava clientSecret is not the expected 40 hex characters — check for a partial copy.\n');
+      }
       return { clientId: id, clientSecret: secret };
     }
   } catch { /* not configured */ }
