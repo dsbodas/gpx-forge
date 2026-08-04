@@ -243,6 +243,18 @@ Finds the Strava segments that lie **on** your route, shows them on the map and
 profile, and writes each one's start into the GPX as a waypoint so the head unit
 warns you before it begins.
 
+### This needs a paid Strava subscription
+
+Since **30 June 2026** the Strava Developer Program's Standard Tier requires an
+active Strava subscription on the account that owns the API application. Without
+one the application is flagged **Inactive** and *every* endpoint returns 403 —
+including `/athlete` — regardless of scopes or credentials.
+
+The app detects this and says so plainly rather than showing a bare 403. If you
+do not subscribe, everything else in GPX Forge works normally; you simply lose
+this panel. The built-in climb detection already gives categorised climbs with
+gradients and times, which is most of what segments are used for.
+
 ### This needs the local server
 
 Strava's OAuth requires `client_secret` to exchange the authorization code and

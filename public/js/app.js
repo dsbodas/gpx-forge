@@ -954,6 +954,23 @@ function renderStrava() {
     return;
   }
 
+  // Connected, but Strava is refusing the app — say so instead of offering a
+  // search button that cannot possibly work.
+  if (st.usable === false) {
+    const warn = document.createElement('p');
+    warn.className = 'status error small';
+    warn.textContent = st.problem || 'Strava is refusing requests from this application.';
+    const link = document.createElement('a');
+    link.className = 'btn small';
+    link.href = 'https://www.strava.com/settings/api';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Open Strava API settings';
+    body.append(warn, link);
+    note.textContent = `Connected as ${st.athlete?.firstname || 'you'}, but the app itself is not permitted to call the API.`;
+    return;
+  }
+
   const find = document.createElement('button');
   find.type = 'button';
   find.className = 'btn full';

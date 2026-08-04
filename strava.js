@@ -22,6 +22,38 @@ const path = require('path');
 const CONFIG_FILE = path.join(__dirname, 'strava.config.json');
 const TOKEN_FILE = path.join(__dirname, '.strava-tokens.json');
 
+/**
+ * Turns Strava's terse error bodies into something actionable.
+ *
+ * The one worth special-casing: since 30 June 2026 the Developer Program's
+ * Standard Tier requires an active Strava subscription on the account that owns
+ * the app. Without one the app is flagged Inactive and *every* endpoint returns
+ * 403 — including /athlete — which looks exactly like a scope or credential bug
+ * and is neither.
+ */
+function describeStravaError(status, bodyText) {
+  let body = null;
+  try { body = JSON.parse(bodyText); } catch { /* not JSON */ }
+
+  const errors = body?.errors || [];
+  if (errors.some((e) => e.resource === 'Application' && e.code === 'Inactive')) {
+    return (
+      'Your Strava API application is marked Inactive, so every endpoint returns 403. ' +
+      'Since 30 June 2026 the Developer Program Standard Tier requires an active Strava ' +
+      'subscription on the account that owns the app. Subscribe on that account, then ' +
+      'reactivate the app at strava.com/settings/api.'
+    );
+  }
+  if (errors.some((e) => e.code === 'exceeded')) {
+    return 'Strava rate limit reached (100 requests / 15 minutes). Wait a few minutes and try again.';
+  }
+  if (status === 401) return 'Strava rejected the token. Disconnect and connect again.';
+  if (status === 403) {
+    return `Strava refused the request (403). ${body?.message || ''} ${JSON.stringify(errors).slice(0, 200)}`.trim();
+  }
+  return `Strava returned ${status}. ${(bodyText || '').slice(0, 200)}`;
+}
+
 const AUTHORIZE_URL = 'https://www.strava.com/oauth/authorize';
 const TOKEN_URL = 'https://www.strava.com/oauth/token';
 const API = 'https://www.strava.com/api/v3';
@@ -108,6 +140,32 @@ async function getAccessToken() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Health probe
+ * ------------------------------------------------------------------ */
+
+let healthProbe = null;
+
+/**
+ * One cheap call to /athlete tells us whether this app is allowed to call the
+ * API at all. Worth knowing up front: an inactive app fails every endpoint, and
+ * discovering that only after a segment search looks like a bug in the search.
+ * Cached, so it costs one request every five minutes at most.
+ */
+async function probeHealth() {
+  if (healthProbe && Date.now() - healthProbe.at < 5 * 60 * 1000) return healthProbe;
+  try {
+    const token = await getAccessToken();
+    const res = await fetch(`${API}/athlete`, { headers: { Authorization: `Bearer ${token}` } });
+    healthProbe = res.ok
+      ? { at: Date.now(), ok: true, message: null }
+      : { at: Date.now(), ok: false, message: describeStravaError(res.status, await res.text().catch(() => '')) };
+  } catch (err) {
+    healthProbe = { at: Date.now(), ok: false, message: err.message };
+  }
+  return healthProbe;
+}
+
+/* ------------------------------------------------------------------ *
  * Segment discovery
  * ------------------------------------------------------------------ */
 
@@ -136,8 +194,7 @@ async function exploreSegments(bboxes, activityType = 'riding') {
 
     if (res.status === 429) { rateLimited = true; break; }
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Strava returned ${res.status} for segment discovery. ${body.slice(0, 200)}`);
+      throw new Error(describeStravaError(res.status, await res.text().catch(() => '')));
     }
 
     const json = await res.json();
@@ -171,8 +228,7 @@ async function segmentDetail(id) {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Strava returned ${res.status} for segment ${id}. ${body.slice(0, 200)}`);
+    throw new Error(describeStravaError(res.status, await res.text().catch(() => '')));
   }
   const s = await res.json();
   return {
@@ -203,15 +259,20 @@ async function segmentDetail(id) {
  * ------------------------------------------------------------------ */
 
 function register(app) {
-  app.get('/api/strava/status', (_req, res) => {
+  app.get('/api/strava/status', async (_req, res) => {
     const config = loadConfig();
     const tokens = loadTokens();
+    const connected = Boolean(tokens?.refresh_token);
+    const health = connected && config ? await probeHealth() : null;
+
     res.json({
       configured: Boolean(config),
-      connected: Boolean(tokens?.refresh_token),
+      connected,
       athlete: tokens?.athlete
         ? { id: tokens.athlete.id, firstname: tokens.athlete.firstname, username: tokens.athlete.username }
         : null,
+      usable: health ? health.ok : null,
+      problem: health && !health.ok ? health.message : null,
     });
   });
 
