@@ -13,7 +13,52 @@
  * what makes the result trustworthy.
  */
 
-import { decodePolyline, haversine, computeDistances, bounds as boundsOf } from './util.js';
+import { decodePolyline, haversine, computeDistances, bounds as boundsOf, mapLimit } from './util.js';
+
+/* ------------------------------------------------------------------ *
+ * Two ways to reach Strava
+ *
+ *   server  – the local server holds client_secret and does the full OAuth
+ *             dance, including refreshing the token when it expires.
+ *   direct  – the browser calls Strava itself with an access token the user
+ *             pasted in. Strava's API sends `access-control-allow-origin: *`
+ *             and permits the Authorization header, so this genuinely works
+ *             from a static host. The token expires roughly every six hours
+ *             and cannot be refreshed here, because refreshing needs the
+ *             client secret — which must never be in a public static build.
+ * ------------------------------------------------------------------ */
+
+const STRAVA_API = 'https://www.strava.com/api/v3';
+
+let directToken = '';
+export function setDirectToken(token) { directToken = String(token || '').trim(); }
+export const hasDirectToken = () => Boolean(directToken);
+
+/** Turns Strava's terse errors into something actionable. Mirrors the server. */
+function describeError(status, body) {
+  const errors = body?.errors || [];
+  if (errors.some((e) => e.resource === 'Application' && e.code === 'Inactive')) {
+    return (
+      'Your Strava API application is marked Inactive, so every endpoint returns 403. ' +
+      'Since 30 June 2026 the Developer Program Standard Tier requires an active Strava ' +
+      'subscription on the account that owns the app.'
+    );
+  }
+  if (status === 401) {
+    return 'Strava rejected the access token — they expire about every six hours. Paste a fresh one from strava.com/settings/api.';
+  }
+  if (status === 429) return 'Strava rate limit reached (100 requests / 15 minutes). Wait a few minutes.';
+  return `Strava returned ${status}. ${body?.message || ''}`.trim();
+}
+
+async function stravaDirect(path) {
+  const res = await fetch(`${STRAVA_API}${path}`, {
+    headers: { Authorization: `Bearer ${directToken}` },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(describeError(res.status, body));
+  return body;
+}
 
 /** Strava's climb_category is 0–5; 0 means uncategorised, 5 means HC. */
 const CATEGORY_LABELS = ['Uncat', 'Cat 4', 'Cat 3', 'Cat 2', 'Cat 1', 'HC'];
@@ -22,13 +67,35 @@ const CATEGORY_COLORS = ['#8a94a6', '#2e7d32', '#f9a825', '#ef6c00', '#c62828', 
 export const categoryLabel = (c) => CATEGORY_LABELS[c] || 'Uncat';
 export const categoryColor = (c) => CATEGORY_COLORS[c] || '#8a94a6';
 
+/**
+ * Reports which transport is usable. The server is preferred when present and
+ * configured, because it can refresh an expired token without help.
+ */
 export async function status() {
   try {
     const res = await fetch('/api/strava/status');
-    if (!res.ok) return { configured: false, connected: false };
-    return await res.json();
-  } catch {
-    return { configured: false, connected: false };
+    if (res.ok) {
+      const json = await res.json();
+      if (json.configured) return { ...json, mode: 'server' };
+    }
+  } catch { /* no server — fall through to the pasted-token path */ }
+
+  if (!directToken) {
+    return { configured: false, connected: false, mode: 'none' };
+  }
+
+  // Verify the pasted token before offering a search that would only fail.
+  try {
+    const athlete = await stravaDirect('/athlete');
+    return {
+      configured: true,
+      connected: true,
+      usable: true,
+      mode: 'direct',
+      athlete: { id: athlete.id, firstname: athlete.firstname, username: athlete.username },
+    };
+  } catch (err) {
+    return { configured: true, connected: true, usable: false, mode: 'direct', problem: err.message };
   }
 }
 
@@ -179,10 +246,68 @@ export function matchSegment(segment, routePoints, index, opts = {}) {
   };
 }
 
+async function exploreViaServer(bboxes, activityType) {
+  const res = await fetch('/api/strava/explore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bboxes, activityType }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error || `Strava lookup failed (${res.status}).`);
+  return json;
+}
+
+const MAX_BBOXES = 40; // Strava allows 100 requests per 15 minutes
+
+/** Browser-direct discovery, for when there is no server to proxy through. */
+async function exploreDirect(bboxes, activityType, onProgress) {
+  const limited = bboxes.slice(0, MAX_BBOXES);
+  const found = new Map();
+  let done = 0;
+  let rateLimited = false;
+
+  // Two at a time: polite, and well inside the published rate limit.
+  await mapLimit(limited, 2, async (box) => {
+    if (rateLimited) return;
+    try {
+      const json = await stravaDirect(
+        `/segments/explore?bounds=${box.join(',')}&activity_type=${activityType}`
+      );
+      for (const s of json?.segments || []) {
+        found.set(s.id, {
+          id: s.id,
+          name: s.name,
+          distance: s.distance,
+          avgGrade: s.avg_grade,
+          elevDifference: s.elev_difference,
+          climbCategory: s.climb_category,
+          startLatlng: s.start_latlng,
+          endLatlng: s.end_latlng,
+          points: s.points,
+        });
+      }
+    } catch (err) {
+      // One rate-limit response means the rest will fail too — stop early and
+      // report what we have rather than hammering a limit we have already hit.
+      if (/rate limit/i.test(err.message)) { rateLimited = true; return; }
+      throw err;
+    }
+    done++;
+    onProgress(`Searched ${done} of ${limited.length} sections…`);
+  });
+
+  return {
+    segments: [...found.values()],
+    requests: done,
+    rateLimited,
+    truncated: bboxes.length > limited.length,
+  };
+}
+
 /**
  * Finds Strava segments that lie along the route.
  * @param {Array} routePoints  full route geometry
- * @param {object} opts { activityType, onProgress, toleranceMetres }
+ * @param {object} opts { activityType, mode, onProgress, toleranceMetres }
  */
 export async function findSegments(routePoints, opts = {}) {
   const { activityType = 'riding', onProgress = () => {} } = opts;
@@ -192,13 +317,9 @@ export async function findSegments(routePoints, opts = {}) {
   const boxes = routeBoundingBoxes(routePoints);
   onProgress(`Asking Strava about ${boxes.length} sections of the route…`);
 
-  const res = await fetch('/api/strava/explore', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bboxes: boxes, activityType }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error || `Strava lookup failed (${res.status}).`);
+  const json = opts.mode === 'direct'
+    ? await exploreDirect(boxes, activityType, onProgress)
+    : await exploreViaServer(boxes, activityType);
 
   onProgress(`Checking which of ${json.segments.length} nearby segments are actually on your route…`);
 
@@ -221,7 +342,8 @@ export async function findSegments(routePoints, opts = {}) {
 }
 
 /** Full detail for one segment, including your own stats if you have ridden it. */
-export async function segmentDetail(id) {
+export async function segmentDetail(id, mode = 'server') {
+  if (mode === 'direct') return stravaDirect(`/segments/${encodeURIComponent(id)}`);
   const res = await fetch(`/api/strava/segment/${encodeURIComponent(id)}`);
   const json = await res.json();
   if (!res.ok) throw new Error(json?.error || `Could not load segment ${id}.`);

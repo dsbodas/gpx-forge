@@ -53,6 +53,7 @@ const settings = loadSettings();
 function loadSettings() {
   const defaults = {
     orsKey: '',
+    stravaToken: '',
     engine: 'brouter',
     profile: 'trekking',
     elevationProvider: 'terrarium',
@@ -218,6 +219,8 @@ function syncProfileSelect() {
 
 function applySettingsToForm() {
   $('ors-key').value = settings.orsKey;
+  $('strava-token').value = settings.stravaToken;
+  strava.setDirectToken(settings.stravaToken);
   $('elev-provider').value = settings.elevationProvider;
   $('set-smooth').value = settings.smoothWindow;
   $('set-threshold').value = settings.ascentThreshold;
@@ -327,6 +330,11 @@ function bindEvents() {
   $('settings-dialog').addEventListener('close', () => {
     const hadKey = Boolean(settings.orsKey);
     settings.orsKey = $('ors-key').value.trim();
+
+    const stravaTokenChanged = settings.stravaToken !== $('strava-token').value.trim();
+    settings.stravaToken = $('strava-token').value.trim();
+    strava.setDirectToken(settings.stravaToken);
+    if (stravaTokenChanged) refreshStravaStatus();
     settings.elevationProvider = $('elev-provider').value;
     settings.smoothWindow = clampNum($('set-smooth').value, 0, 500, ANALYSIS_DEFAULTS.smoothWindow);
     settings.ascentThreshold = clampNum($('set-threshold').value, 0, 30, ANALYSIS_DEFAULTS.ascentThreshold);
@@ -893,7 +901,7 @@ function renderGradient() {
 /* ---------------- Strava segments ---------------- */
 
 async function refreshStravaStatus() {
-  state.stravaStatus = hasServer() ? await strava.status() : { configured: false, connected: false };
+  state.stravaStatus = await strava.status();
   renderStrava();
 }
 
@@ -902,6 +910,7 @@ async function findStravaSegments() {
   await withBusy(null, async () => {
     setStatus('Looking for Strava segments…', 'busy');
     const result = await strava.findSegments(state.routePoints, {
+      mode: state.stravaStatus.mode,
       onProgress: (msg) => setStatus(msg, 'busy'),
     });
     state.segments = result.segments;
@@ -921,23 +930,30 @@ function renderStrava() {
   const note = $('strava-note');
   const st = state.stravaStatus;
 
-  // Nothing to show on the static build — there is no server to hold the secret.
-  if (!hasServer() || !st.configured) {
-    card.hidden = !state.routePoints.length || !hasServer();
-    if (!card.hidden) {
-      body.innerHTML = '';
-      const p = document.createElement('p');
-      p.className = 'muted small';
-      p.textContent =
-        'Strava needs API credentials on the server — see README → Strava segments. ' +
-        'It cannot work on the hosted site because Strava requires a client secret and has no PKCE flow.';
-      body.append(p);
-      note.textContent = '';
-    }
+  card.hidden = !state.routePoints.length;
+  if (card.hidden) return;
+
+  // Not set up either way: explain both routes in, rather than declaring it
+  // impossible. Strava's API does send CORS headers, so a pasted access token
+  // works from the hosted site — only the OAuth exchange needs a server.
+  if (!st.configured) {
+    body.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = hasServer()
+      ? 'Add Strava credentials to the server (README → Strava segments) for automatic sign-in, ' +
+        'or paste an access token in Settings to use it right away.'
+      : 'Paste a Strava access token in Settings to find segments here. ' +
+        'Automatic sign-in needs the local server, because Strava requires a client secret and has no PKCE flow.';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn small';
+    btn.textContent = 'Open Settings';
+    btn.addEventListener('click', () => $('settings-dialog').showModal());
+    body.append(p, btn);
+    note.textContent = '';
     return;
   }
-
-  card.hidden = !state.routePoints.length;
   body.innerHTML = '';
   $('strava-count').textContent = state.segments.length ? String(state.segments.length) : '';
 
@@ -954,6 +970,13 @@ function renderStrava() {
     return;
   }
 
+  if (st.mode === 'direct') {
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = 'Using a pasted access token. Strava rotates these about every six hours.';
+    body.append(p);
+  }
+
   // Connected, but Strava is refusing the app — say so instead of offering a
   // search button that cannot possibly work.
   if (st.usable === false) {
@@ -967,7 +990,11 @@ function renderStrava() {
     link.rel = 'noopener noreferrer';
     link.textContent = 'Open Strava API settings';
     body.append(warn, link);
-    note.textContent = `Connected as ${st.athlete?.firstname || 'you'}, but the app itself is not permitted to call the API.`;
+    // Distinguish "your token is stale" from "your app is barred" — they need
+    // completely different actions.
+    note.textContent = /access token/i.test(st.problem || '')
+      ? 'The token is missing, expired or mistyped. Everything else in the app is unaffected.'
+      : `Connected as ${st.athlete?.firstname || 'you'}, but the application itself is not permitted to call the API.`;
     return;
   }
 

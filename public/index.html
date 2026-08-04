@@ -228,6 +228,16 @@
     </div>
 
     <div class="field">
+      <label for="strava-token">Strava access token <span class="muted">(optional)</span></label>
+      <input type="password" id="strava-token" autocomplete="off" spellcheck="false"
+             placeholder="Paste to enable segments without running the server">
+      <p class="muted small">Only needed on the hosted site. Copy <em>Your Access Token</em> from
+        <span class="link-literal">strava.com/settings/api</span>. Strava rotates it about every six
+        hours, so it will need re-pasting; running the app locally avoids that, because the server
+        refreshes it for you. Stored only in this browser.</p>
+    </div>
+
+    <div class="field">
       <label for="elev-provider">Elevation source</label>
       <select id="elev-provider">
         <option value="terrarium">Terrain tiles — AWS open data (~30 m)</option>

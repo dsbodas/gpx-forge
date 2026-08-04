@@ -255,12 +255,26 @@ do not subscribe, everything else in GPX Forge works normally; you simply lose
 this panel. The built-in climb detection already gives categorised climbs with
 gradients and times, which is most of what segments are used for.
 
-### This needs the local server
+### Two ways to connect
 
 Strava's OAuth requires `client_secret` to exchange the authorization code and
-**does not support PKCE**, so a browser-only client cannot authenticate without
-publishing the secret. The hosted site therefore cannot offer this — run
-`npm start`.
+**does not support PKCE**, so only a server can complete a sign-in. Their API
+itself, however, does send `access-control-allow-origin: *` and accepts the
+`Authorization` header — so once you *have* a token, the browser can call Strava
+directly.
+
+|  | Local (`npm start`) | Hosted site |
+|---|---|---|
+| Sign-in | one click, full OAuth | paste an access token |
+| Token refresh | automatic | re-paste every ~6 hours |
+| Setup | `strava.config.json` | nothing |
+
+On the hosted site, copy **Your Access Token** from
+`strava.com/settings/api` into Settings → *Strava access token*. It is stored
+only in that browser and sent only to Strava. Strava rotates it about every six
+hours; refreshing it automatically needs the client secret, which must never be
+in a public static build, so the local server is the better choice for regular
+use.
 
 ### Setup, once
 
