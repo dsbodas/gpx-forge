@@ -29,7 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `enablement` turns Pages on via the API if it is not already enabled,
+      # so there is no manual visit to Settings → Pages after the first push.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3

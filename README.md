@@ -11,7 +11,24 @@ cleanly onto a Garmin, Wahoo or Hammerhead.
 
 ---
 
-## Running it
+## Try it
+
+**https://dsbodas.github.io/gpx-forge/** — no install, works on a phone.
+
+The hosted version is the `public/` folder served as static files. Everything it
+needs — BRouter, OSRM, Open-Meteo, Overpass, Nominatim, OpenRouteService — sends
+permissive CORS headers, so the browser talks to them directly and there is no
+backend to run or pay for.
+
+Two things only the local server can do:
+
+- **expand shortened links** (`maps.app.goo.gl/…`), because following the
+  redirect is blocked cross-origin. Open the short link in a browser and paste
+  the full URL from the address bar instead.
+- **fall back to OpenTopoData** for elevation, which sends no CORS header. The
+  primary source (Open-Meteo) works fine.
+
+## Running it locally
 
 ```bash
 npm install
@@ -21,14 +38,17 @@ npm install
 npm start
 ```
 
-Then open **http://localhost:8787**.
+Then open **http://localhost:8787**. This gets you short-link expansion, the
+elevation fallback, and server-side caching of repeated lookups.
 
-To use it from your phone on the same Wi-Fi, find your machine's IP
-(`ipconfig getifaddr en0` on macOS) and visit `http://<that-ip>:8787`.
+To test from your phone on the same Wi-Fi, run the server and visit
+`http://<your-machine-ip>:8787` (`ipconfig getifaddr en0` on macOS).
 
 ### Installing it as an app
 
-It is a PWA, so it installs on every platform without an app store:
+It is a PWA, so it installs on every platform without an app store. Install from
+the **hosted link** rather than a `localhost`/LAN address — iOS only offers *Add
+to Home Screen* over HTTPS:
 
 - **iPhone / iPad** — open in Safari, Share → *Add to Home Screen*.
 - **Android** — open in Chrome, menu → *Install app*. Once installed you can also
