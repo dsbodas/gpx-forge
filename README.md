@@ -202,14 +202,33 @@ follow. Turn them on only if you want a pace target to ride against.
 Each preset carries a point budget, and the track is simplified to fit rather
 than letting the device truncate it silently.
 
-| Preset | Budget |
-|---|---|
-| Universal *(default)* | 10 000 |
-| Garmin Edge — modern | 10 000 |
-| Garmin Edge — 500/510/800/810 | 4 000 |
-| Wahoo ELEMNT / BOLT / ROAM | 15 000 |
-| Hammerhead Karoo | 20 000 |
-| Maximum detail | no limit |
+| Preset | Budget | Notes |
+|---|---|---|
+| Universal *(default)* | 10 000 | |
+| Garmin Edge — modern | 10 000 | |
+| Garmin Edge — 500/510/800/810 | 4 000 | |
+| Wahoo ELEMNT / BOLT / ROAM | 15 000 | |
+| Hammerhead Karoo | 20 000 | |
+| Magene C406 / C506 / C606 | 5 000 | plain GPX; 300 km route limit |
+| Maximum detail | no limit | |
+
+### Magene
+
+Magene units import through the **OneLapFit** app, which accepts ordinary GPX
+from Komoot and Strava — so a plain GPX 1.1 track is what they want. The preset
+emits exactly that, with the custom extension namespace stripped, since an
+unknown prefix is the usual thing a strict importer trips over. The `<desc>`
+summary is standard GPX and stays, so the headline numbers still show up.
+
+Magene documents a **distance** limit rather than a point limit: 300 km per
+route, 1 000 km on the C606 Pro. The app warns on export if a route exceeds it.
+
+If any other device refuses a file, tick **Plain GPX** — it applies the same
+treatment to any preset.
+
+> Not verified against a physical Magene unit. The preset is built from Magene's
+> published limits and from what their import path is documented to accept; if
+> your device rejects something, that is the setting to try first.
 
 Simplification protects the elevation profile as well as the map line. A plain
 line-simplification pass would reduce a dead-straight road over a mountain pass to
@@ -218,11 +237,69 @@ error independently.
 
 ---
 
+## Strava segments
+
+Finds the Strava segments that lie **on** your route, shows them on the map and
+profile, and writes each one's start into the GPX as a waypoint so the head unit
+warns you before it begins.
+
+### This needs the local server
+
+Strava's OAuth requires `client_secret` to exchange the authorization code and
+**does not support PKCE**, so a browser-only client cannot authenticate without
+publishing the secret. The hosted site therefore cannot offer this — run
+`npm start`.
+
+### Setup, once
+
+1. Create an app at **https://www.strava.com/settings/api**
+   Set **Authorization Callback Domain** to exactly `localhost`.
+2. Copy `strava.config.example.json` to `strava.config.json` and paste in your
+   Client ID and Client Secret. That file is gitignored — the secret must never
+   reach this repository, which is public. `STRAVA_CLIENT_ID` /
+   `STRAVA_CLIENT_SECRET` environment variables work too.
+3. Restart the server, build a route, then **Connect Strava** in the panel.
+
+Only the read-only `read` scope is requested, and tokens are stored in
+`.strava-tokens.json` on your own machine (also gitignored, mode 0600).
+
+### How a segment is decided to be "on" the route
+
+Strava's `/segments/explore` takes a bounding box and returns at most ten
+segments, so the route is walked in overlapping ~4 km boxes. Those boxes catch
+everything *near* the route, most of which is not on it — the parallel main
+road, or the descent of the climb you are going up.
+
+A segment is kept only when **90% of it lies within 25 m of your route** *and*
+its start-to-end order agrees with your direction of travel. That direction test
+is what stops the descent of a climb being reported as being on your ride.
+
+Tested against the real Alpe d'Huez geometry with synthetic segments:
+
+| Case | Result |
+|---|---|
+| 5 km of the climb, same direction | matched, 100% coverage |
+| Same stretch reversed (descent segment) | **rejected** |
+| Parallel road 200 m away | **rejected** |
+| Half on route, then diverging | **rejected** |
+| Same road with a 12 m GPS offset | matched, 9.2 m mean offset |
+
+Strava allows 100 requests per 15 minutes. A 15 km route costs 5; discovery is
+capped at 40 boxes per search and results are cached, so re-searching is free.
+
+> The OAuth round trip and the live segment calls are the one part of this
+> project not exercised end to end, because that needs your own Strava
+> credentials. The matching, request-chunking and failure paths are tested.
+
+---
+
 ## How it is put together
 
 ```
 server.js              Static host + short-link resolver + allowlisted proxy
+strava.js              Strava OAuth + segment discovery (server-side; holds the secret)
 public/
+    strava.js          Strava client: bounding boxes, segment/route matching
   index.html
   css/style.css
   js/

@@ -260,6 +260,46 @@ export class RouteMap {
     }
   }
 
+  /* ---------------- Strava segments ---------------- */
+
+  setSegments(segments) {
+    if (!this.segmentLayer) this.segmentLayer = L.layerGroup().addTo(this.map);
+    this.segmentLayer.clearLayers();
+    if (!segments?.length) return;
+
+    for (const seg of segments) {
+      if (!seg.latlngs?.length) continue;
+      L.polyline(seg.latlngs.map((p) => [p.lat, p.lon]), {
+        color: '#fc4c02', // Strava orange
+        weight: 3,
+        opacity: 0.75,
+        dashArray: '6 4',
+        interactive: true,
+      })
+        .bindPopup(
+          `<div class="wp-popup"><strong>${escapeHtml(seg.name)}</strong>` +
+            `<div>${fmtDistance(seg.distance, this.units)} at ${Number(seg.avgGrade).toFixed(1)}%` +
+            (seg.categoryLabel && seg.categoryLabel !== 'Uncat' ? ` · ${seg.categoryLabel}` : '') +
+            `</div>` +
+            `<div class="muted">Starts at ${fmtDistance(seg.startDist, this.units)} on your route</div>` +
+            `<div class="muted"><a href="https://www.strava.com/segments/${seg.id}" target="_blank" rel="noopener noreferrer">Open on Strava</a></div>` +
+            `</div>`
+        )
+        .addTo(this.segmentLayer);
+    }
+  }
+
+  highlightSegment(seg) {
+    if (!seg?.latlngs?.length) return;
+    if (this.segmentHighlight) this.map.removeLayer(this.segmentHighlight);
+    this.segmentHighlight = L.polyline(seg.latlngs.map((p) => [p.lat, p.lon]), {
+      color: '#fc4c02',
+      weight: 7,
+      opacity: 0.9,
+      interactive: false,
+    }).addTo(this.map);
+  }
+
   /* ---------------- cursor ---------------- */
 
   setCursor(point) {

@@ -14,6 +14,7 @@ import { analyse, DEFAULTS as ANALYSIS_DEFAULTS } from './analysis.js';
 import { fromOrsExtras, fromOverpass, rideabilityFactor } from './surface.js';
 import { estimate, climbTimes, powerForFlatSpeed, BIKE_PRESETS, DEFAULTS as PHYS_DEFAULTS } from './timemodel.js';
 import { buildGpx, gpxFilename, DEVICE_PRESETS, fitToLimit } from './gpx.js';
+import * as strava from './strava.js';
 import { ElevationProfile } from './profile.js';
 import { RouteMap } from './map.js';
 import {
@@ -43,6 +44,8 @@ const state = {
   units: 'metric',
   busy: false,
   selectedClimb: null,
+  segments: [],          // Strava segments matched onto this route
+  stravaStatus: { configured: false, connected: false },
 };
 
 const settings = loadSettings();
@@ -134,8 +137,22 @@ async function init() {
     online ? '' : 'busy'
   );
 
+  refreshStravaStatus();
+
+  const params = new URLSearchParams(location.search);
+
+  // Returning from the Strava OAuth round trip.
+  const stravaResult = params.get('strava');
+  if (stravaResult === 'connected') {
+    toast('Connected to Strava. Build a route, then search for segments.', 'ok');
+    history.replaceState(null, '', location.pathname);
+  } else if (stravaResult === 'denied') {
+    toast('Strava sign-in was cancelled.', 'error');
+    history.replaceState(null, '', location.pathname);
+  }
+
   // Deep link support: ?route=<url>
-  const shared = new URLSearchParams(location.search).get('route');
+  const shared = params.get('route');
   if (shared) {
     $('input-text').value = shared;
     buildFromInput();
@@ -168,6 +185,7 @@ function buildSelects() {
   }
   device.value = settings.device;
   $('device-blurb').textContent = DEVICE_PRESETS[settings.device].blurb;
+  $('opt-plain').checked = Boolean(DEVICE_PRESETS[settings.device].plainGpx);
 
   const bike = $('bike-select');
   bike.innerHTML = '';
@@ -272,10 +290,14 @@ function bindEvents() {
 
   $('device-select').addEventListener('change', (e) => {
     settings.device = e.target.value;
-    $('device-blurb').textContent = DEVICE_PRESETS[settings.device].blurb;
+    const preset = DEVICE_PRESETS[settings.device];
+    $('device-blurb').textContent = preset.blurb;
+    // Follow the preset's recommendation, which the user can still override.
+    $('opt-plain').checked = Boolean(preset.plainGpx);
     saveSettings();
     updateExportNote();
   });
+  $('opt-plain').addEventListener('change', updateExportNote);
 
   $('bike-select').addEventListener('change', (e) => {
     settings.bikePreset = e.target.value;
@@ -474,6 +496,10 @@ async function routeAndAnalyse() {
   }
 
   state.isFullGeometry = false;
+  // The old segments belong to the old geometry; keeping them would show
+  // segments that are no longer on the route.
+  state.segments = [];
+  state.segmentMeta = null;
   const engine = settings.engine;
   setStatus(`Routing with ${ENGINES[engine].label}…`, 'busy');
 
@@ -630,10 +656,13 @@ function clearAll() {
   state.time = null;
   state.selectedClimb = null;
   state.isFullGeometry = false;
+  state.segments = [];
+  state.segmentMeta = null;
   $('input-text').value = '';
   map.setRoute([]);
   map.setWaypoints([]);
   map.setClimbs([]);
+  map.setSegments([]);
   map.setCursor(null);
   chart.setData(null);
   renderAll();
@@ -666,12 +695,14 @@ function renderAll() {
   renderClimbs();
   renderGradient();
   renderSurface();
+  renderStrava();
   renderTime();
   updateExportNote();
 
   map.setWaypoints(state.waypoints);
   map.setRoute(state.routePoints, { profile: state.stats?.profile });
   map.setClimbs(state.stats?.climbs || []);
+  map.setSegments(state.segments);
   chart.setData(state.stats);
 }
 
@@ -859,6 +890,124 @@ function renderGradient() {
   }
 }
 
+/* ---------------- Strava segments ---------------- */
+
+async function refreshStravaStatus() {
+  state.stravaStatus = hasServer() ? await strava.status() : { configured: false, connected: false };
+  renderStrava();
+}
+
+async function findStravaSegments() {
+  if (!state.routePoints.length) return;
+  await withBusy(null, async () => {
+    setStatus('Looking for Strava segments…', 'busy');
+    const result = await strava.findSegments(state.routePoints, {
+      onProgress: (msg) => setStatus(msg, 'busy'),
+    });
+    state.segments = result.segments;
+    state.segmentMeta = result;
+    renderAll();
+    setStatus(
+      `${result.segments.length} segment${result.segments.length === 1 ? '' : 's'} on this route ` +
+        `(of ${result.considered} nearby).`,
+      'ok'
+    );
+  });
+}
+
+function renderStrava() {
+  const card = $('strava-card');
+  const body = $('strava-body');
+  const note = $('strava-note');
+  const st = state.stravaStatus;
+
+  // Nothing to show on the static build — there is no server to hold the secret.
+  if (!hasServer() || !st.configured) {
+    card.hidden = !state.routePoints.length || !hasServer();
+    if (!card.hidden) {
+      body.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'muted small';
+      p.textContent =
+        'Strava needs API credentials on the server — see README → Strava segments. ' +
+        'It cannot work on the hosted site because Strava requires a client secret and has no PKCE flow.';
+      body.append(p);
+      note.textContent = '';
+    }
+    return;
+  }
+
+  card.hidden = !state.routePoints.length;
+  body.innerHTML = '';
+  $('strava-count').textContent = state.segments.length ? String(state.segments.length) : '';
+
+  if (!st.connected) {
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = 'Connect your Strava account to find segments along this route.';
+    const a = document.createElement('a');
+    a.className = 'btn primary full';
+    a.href = '/api/strava/login';
+    a.textContent = 'Connect Strava';
+    body.append(p, a);
+    note.textContent = 'Read-only access to public segments. Tokens stay on this machine.';
+    return;
+  }
+
+  const find = document.createElement('button');
+  find.type = 'button';
+  find.className = 'btn full';
+  find.textContent = state.segments.length ? 'Search again' : 'Find segments on this route';
+  find.addEventListener('click', findStravaSegments);
+  body.append(find);
+
+  for (const seg of state.segments) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'climb';
+    row.style.setProperty('--cat', seg.categoryColor);
+
+    const badge = document.createElement('span');
+    badge.className = 'climb-badge';
+    badge.textContent = seg.categoryLabel;
+
+    const main = document.createElement('span');
+    main.className = 'climb-main';
+    const title = document.createElement('span');
+    title.className = 'climb-title';
+    title.textContent = seg.name;
+    const sub = document.createElement('span');
+    sub.className = 'climb-sub';
+    sub.textContent =
+      `${fmtDistance(seg.distance, state.units)} · ${Number(seg.avgGrade).toFixed(1)}% · ` +
+      `from ${fmtDistance(seg.startDist, state.units)}`;
+    main.append(title, document.createElement('br'), sub);
+
+    const grade = document.createElement('span');
+    grade.className = 'climb-grade';
+    grade.innerHTML = '<small></small>';
+    grade.prepend(document.createTextNode(`${Number(seg.avgGrade).toFixed(1)}%`));
+    grade.querySelector('small').textContent = `${Math.round(seg.coverage * 100)}% match`;
+
+    row.append(badge, main, grade);
+    row.addEventListener('click', () => {
+      map.highlightSegment(seg);
+      map.fit(seg.latlngs);
+    });
+    body.append(row);
+  }
+
+  const meta = state.segmentMeta;
+  const bits = [];
+  if (meta) {
+    bits.push(`${meta.considered} segments found nearby, ${state.segments.length} actually on the route.`);
+    if (meta.rateLimited) bits.push('Strava rate-limited the search — some sections were skipped.');
+    if (meta.truncated) bits.push('Route is long; only the first sections were searched.');
+  }
+  bits.push('Matching requires 90% of the segment within 25 m of your route, travelling the same way.');
+  note.textContent = bits.join(' ');
+}
+
 function renderSurface() {
   const wrap = $('surface-content');
   wrap.innerHTML = '';
@@ -964,10 +1113,26 @@ function updateExportNote() {
   const preset = DEVICE_PRESETS[settings.device];
   const kept = fitToLimit(state.routePoints, preset.maxPoints).length;
   const total = state.routePoints.length;
-  $('export-note').textContent =
+
+  const parts = [
     kept < total
       ? `${kept.toLocaleString()} of ${total.toLocaleString()} points kept — simplified to fit the device budget, preserving the elevation profile.`
-      : `All ${total.toLocaleString()} points kept.`;
+      : `All ${total.toLocaleString()} points kept.`,
+  ];
+
+  // Some devices cap route *length* rather than point count.
+  const km = state.stats.distance / 1000;
+  if (preset.maxDistanceKm && km > preset.maxDistanceKm) {
+    parts.push(
+      `This route is ${Math.round(km)} km, over the ${preset.maxDistanceKm} km limit for this device — ` +
+        `split it into stages, or use a model with a higher limit.`
+    );
+  }
+  if ($('opt-plain').checked) {
+    parts.push('Plain GPX: statistics block omitted, summary line kept.');
+  }
+
+  $('export-note').textContent = parts.join(' ');
 }
 
 /* ================================================================== *
@@ -985,13 +1150,16 @@ function downloadGpx() {
     waypoints: state.waypoints,
     surface: state.surface,
     time: state.time,
+    segments: state.segments,
     meta: state.meta,
     options: {
       preset: settings.device,
+      includeSegments: $('opt-segments').checked,
       includeClimbWaypoints: $('opt-climbs').checked,
       includeWaypoints: $('opt-waypoints').checked,
       includeRoute: $('opt-route').checked,
       timestamps: $('opt-time').checked,
+      plainGpx: $('opt-plain').checked,
       units: state.units,
     },
   });

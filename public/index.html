@@ -135,6 +135,13 @@
       <p class="muted small" id="surface-note"></p>
     </section>
 
+    <!-- strava segments -->
+    <section class="card" id="strava-card" hidden>
+      <h2>Strava segments <span class="count" id="strava-count"></span></h2>
+      <div id="strava-body"></div>
+      <p class="muted small" id="strava-note"></p>
+    </section>
+
     <!-- time -->
     <section class="card" id="time-card" hidden>
       <h2>Ride time estimate</h2>
@@ -177,7 +184,12 @@
         <label><input type="checkbox" id="opt-waypoints" checked> My waypoints</label>
         <label><input type="checkbox" id="opt-route"> Also write a &lt;rte&gt; route block</label>
         <label><input type="checkbox" id="opt-time"> Virtual timestamps (pace target)</label>
+        <label><input type="checkbox" id="opt-plain"> Plain GPX &mdash; strip custom extensions</label>
+        <label><input type="checkbox" id="opt-segments" checked> Strava segment waypoints</label>
       </div>
+      <p class="muted small">Turn on <em>plain GPX</em> if a device refuses the file. It removes the
+        extra statistics block, which is the usual thing a strict importer trips over. The
+        summary line stays, so the numbers are still readable on the device.</p>
       <button type="button" id="download-btn" class="btn primary full">Download GPX</button>
       <p class="muted small" id="export-note"></p>
     </section>

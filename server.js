@@ -70,8 +70,17 @@ app.use(
   })
 );
 
+const strava = require('./strava');
+strava.register(app);
+
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'gpx-forge', version: 1 });
+  res.json({
+    ok: true,
+    service: 'gpx-forge',
+    version: 1,
+    // Lets the client show or hide the Strava panel without a second probe.
+    strava: Boolean(strava.loadConfig()),
+  });
 });
 
 /* ------------------------------------------------------------------ *

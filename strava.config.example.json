@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy this file to strava.config.json and fill in your own values. strava.config.json is gitignored — never commit real credentials, this repository is public. You can use the STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environment variables instead.",
+  "_setup": "Create an app at https://www.strava.com/settings/api — set Authorization Callback Domain to exactly: localhost",
+  "clientId": "12345",
+  "clientSecret": "your-client-secret-here"
+}

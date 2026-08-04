@@ -66,6 +66,22 @@ export const DEVICE_PRESETS = {
     timestamps: false,
     blurb: 'Full detail; Karoo re-routes from the track anyway.',
   },
+  magene: {
+    id: 'magene',
+    label: 'Magene C406 / C506 / C606 (OneLapFit)',
+    maxPoints: 5000,
+    includeTrack: true,
+    includeRoute: false,
+    timestamps: false,
+    // Magene imports through the OneLapFit app, which happily takes ordinary
+    // Komoot/Strava GPX — so a plain GPX 1.1 track is what it wants. Custom
+    // extension namespaces are the usual thing a strict importer trips over,
+    // so they are stripped here. Magene documents a *distance* limit rather
+    // than a point limit: 300 km per route, 1 000 km on the C606 Pro.
+    plainGpx: true,
+    maxDistanceKm: 300,
+    blurb: 'Plain GPX 1.1 track, no custom extensions. Import via the OneLapFit app. Route limit 300 km (1 000 km on C606 Pro).',
+  },
   maxDetail: {
     id: 'maxDetail',
     label: 'Maximum detail (no simplification)',
@@ -163,8 +179,10 @@ export function buildGpx(input) {
   const opts = {
     includeClimbWaypoints: true,
     includeWaypoints: true,
+    includeSegments: true,
     includeRoute: preset.includeRoute,
     timestamps: preset.timestamps,
+    plainGpx: Boolean(preset.plainGpx),
     startTime: new Date(),
     units: 'metric',
     ...options,
@@ -175,10 +193,15 @@ export function buildGpx(input) {
 
   const out = [];
   out.push('<?xml version="1.0" encoding="UTF-8"?>');
+  // In plain mode declare nothing but the GPX namespace itself. An importer
+  // that chokes on an unknown prefix never sees one.
   out.push(
-    `<gpx version="1.1" creator="GPX Forge" xmlns="${NS}" xmlns:xsi="${NS_XSI}" ` +
-      `xmlns:gpxx="${NS_GPXX}" xmlns:forge="${NS_FORGE}" ` +
-      `xsi:schemaLocation="${NS} ${NS}/gpx.xsd">`
+    opts.plainGpx
+      ? `<gpx version="1.1" creator="GPX Forge" xmlns="${NS}" xmlns:xsi="${NS_XSI}" ` +
+        `xsi:schemaLocation="${NS} ${NS}/gpx.xsd">`
+      : `<gpx version="1.1" creator="GPX Forge" xmlns="${NS}" xmlns:xsi="${NS_XSI}" ` +
+        `xmlns:gpxx="${NS_GPXX}" xmlns:forge="${NS_FORGE}" ` +
+        `xsi:schemaLocation="${NS} ${NS}/gpx.xsd">`
   );
 
   /* ---- metadata (schema order: name, desc, author, link, time, keywords, bounds, extensions) ---- */
@@ -195,7 +218,9 @@ export function buildGpx(input) {
     `    <bounds minlat="${num(bb[0][0])}" minlon="${num(bb[0][1])}" ` +
       `maxlat="${num(bb[1][0])}" maxlon="${num(bb[1][1])}"/>`
   );
-  out.push(statsExtensions(stats, surface, time, meta, '    '));
+  // The <desc> summary above already carries the headline numbers in plain
+  // text, so plain mode loses the machine-readable block but not the meaning.
+  if (!opts.plainGpx) out.push(statsExtensions(stats, surface, time, meta, '    '));
   out.push('  </metadata>');
 
   /* ---- waypoints ---- */
@@ -203,6 +228,26 @@ export function buildGpx(input) {
     for (const wp of waypoints) {
       if (wp.lat == null || wp.lon == null) continue;
       out.push(waypointXml(wp.lat, wp.lon, wp.ele, wp.name || 'Waypoint', wp.desc, wp.sym || 'Flag, Blue'));
+    }
+  }
+
+  // Strava segment starts, so the device tells you a segment is coming up.
+  if (opts.includeSegments && input.segments?.length) {
+    for (const seg of input.segments) {
+      const detail =
+        `Strava segment · ${fmtDistance(seg.distance, opts.units)} at ${Number(seg.avgGrade).toFixed(1)}%` +
+        (seg.elevDifference != null ? `, ${fmtElevation(seg.elevDifference, opts.units)} gain` : '') +
+        (seg.categoryLabel && seg.categoryLabel !== 'Uncat' ? ` (${seg.categoryLabel})` : '');
+      out.push(
+        waypointXml(
+          seg.latlngs?.[0]?.lat ?? seg.startLatlng?.[0],
+          seg.latlngs?.[0]?.lon ?? seg.startLatlng?.[1],
+          null,
+          `⚑ ${seg.name}`,
+          detail,
+          'Flag, Blue'
+        )
+      );
     }
   }
 
