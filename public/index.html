@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#11161d">
+  <meta name="description" content="Build cycling-computer-ready GPX files from Google Maps, Apple Maps or any map link — with elevation profile, categorised climbs, gradient and surface analysis.">
+  <title>GPX Forge — route to GPX for cycling computers</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="GPX Forge">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true" class="brand-mark">
+      <path d="M2 24 L10 12 L15 19 L21 7 L30 24" fill="none" stroke="currentColor" stroke-width="2.6"
+            stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="21" cy="7" r="2.6" fill="currentColor"/>
+    </svg>
+    <div>
+      <h1>GPX Forge</h1>
+      <p class="tagline">Any map link &rarr; a GPX your head unit understands</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <div class="seg" role="group" aria-label="Units">
+      <button type="button" id="unit-metric" class="seg-btn is-active" aria-pressed="true">km</button>
+      <button type="button" id="unit-imperial" class="seg-btn" aria-pressed="false">mi</button>
+    </div>
+    <button type="button" id="install-btn" class="btn ghost" hidden>Install app</button>
+    <button type="button" id="settings-btn" class="btn ghost" aria-haspopup="dialog">Settings</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ left panel ============ -->
+  <aside class="panel" id="panel">
+
+    <!-- input -->
+    <section class="card">
+      <h2>1 · Bring in a route</h2>
+      <label class="sr-only" for="input-text">Map link, coordinates or place names</label>
+      <textarea id="input-text" rows="3" spellcheck="false"
+        placeholder="Paste a Google Maps / Apple Maps directions link&#10;…or coordinates, one per line: 45.9237, 6.8694&#10;…or place names: Chamonix / Col des Montets / Martigny"></textarea>
+
+      <div class="row">
+        <button type="button" id="build-btn" class="btn primary">Build route</button>
+        <button type="button" id="file-btn" class="btn">Import file…</button>
+        <input type="file" id="file-input" accept=".gpx,.kml,.tcx,.geojson,.json" hidden>
+      </div>
+
+      <details class="hint">
+        <summary>What can I paste?</summary>
+        <ul>
+          <li><strong>Google Maps</strong> — share a route, or copy the address-bar URL of a directions page. Short <code>maps.app.goo.gl</code> links work too.</li>
+          <li><strong>Apple Maps</strong> — share &rarr; Copy Link.</li>
+          <li><strong>OpenStreetMap, Bing, Waze, BRouter</strong> links.</li>
+          <li><strong>Any other site</strong> (Komoot, Strava, RideWithGPS, plotaroute) — export GPX there and drop the file here.</li>
+          <li><strong>Coordinates or place names</strong>, one per line.</li>
+        </ul>
+        <p class="muted small">Google and Apple provide no route-export API, so the app reads the
+          waypoints out of your link and re-plans the route on the OpenStreetMap cycling network —
+          which gives better bike routing than the original anyway.</p>
+      </details>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- waypoints -->
+    <section class="card" id="waypoints-card" hidden>
+      <h2>2 · Waypoints <span class="count" id="wp-count"></span></h2>
+      <p class="muted small">Drag pins on the map to move them. Click the map to add one at the end,
+        or click the route line to insert a point there.</p>
+      <ol class="wp-list" id="wp-list"></ol>
+      <div class="row">
+        <button type="button" id="reverse-btn" class="btn small">Reverse</button>
+        <button type="button" id="loop-btn" class="btn small">Close the loop</button>
+        <button type="button" id="clear-btn" class="btn small danger">Clear all</button>
+      </div>
+    </section>
+
+    <!-- routing -->
+    <section class="card" id="routing-card" hidden>
+      <h2>3 · Routing</h2>
+      <div class="field">
+        <label for="engine-select">Engine</label>
+        <select id="engine-select"></select>
+        <p class="muted small" id="engine-blurb"></p>
+      </div>
+      <div class="field">
+        <label for="profile-select">Profile</label>
+        <select id="profile-select"></select>
+      </div>
+      <button type="button" id="reroute-btn" class="btn primary full">Re-route</button>
+    </section>
+
+    <!-- stats -->
+    <section class="card" id="stats-card" hidden>
+      <h2>Route summary</h2>
+      <div class="stats-grid" id="stats-grid"></div>
+      <p class="muted small" id="ascent-note"></p>
+    </section>
+
+    <!-- climbs -->
+    <section class="card" id="climbs-card" hidden>
+      <h2>Climbs <span class="count" id="climb-count"></span></h2>
+      <div id="climbs-list" class="climbs"></div>
+      <p class="muted small">Categories follow the Strava scheme (length&nbsp;&times;&nbsp;gradient,
+        minimum 3% over 500&nbsp;m). FIETS is a gradient-weighted difficulty index &mdash;
+        Alpe&nbsp;d'Huez scores about 9.</p>
+    </section>
+
+    <!-- gradient -->
+    <section class="card" id="gradient-card" hidden>
+      <h2>Gradient breakdown</h2>
+      <div class="bar-stack" id="gradient-bar"></div>
+      <div class="legend" id="gradient-legend"></div>
+    </section>
+
+    <!-- surface -->
+    <section class="card" id="surface-card" hidden>
+      <h2>Surface &amp; road type</h2>
+      <div id="surface-content"></div>
+      <button type="button" id="surface-btn" class="btn full">Analyse surface from OpenStreetMap</button>
+      <p class="muted small" id="surface-note"></p>
+    </section>
+
+    <!-- time -->
+    <section class="card" id="time-card" hidden>
+      <h2>Ride time estimate</h2>
+      <div class="stats-grid compact" id="time-grid"></div>
+      <div class="field">
+        <label for="bike-select">Bike &amp; position</label>
+        <select id="bike-select"></select>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="rider-mass">Rider (kg)</label>
+          <input type="number" id="rider-mass" min="35" max="200" step="1">
+        </div>
+        <div class="field">
+          <label for="bike-mass">Bike + kit (kg)</label>
+          <input type="number" id="bike-mass" min="3" max="60" step="0.5">
+        </div>
+      </div>
+      <div class="field">
+        <label for="power-input">Sustainable power: <output id="power-out"></output></label>
+        <input type="range" id="power-input" min="70" max="400" step="5">
+        <p class="muted small" id="power-hint"></p>
+      </div>
+    </section>
+
+    <!-- export -->
+    <section class="card accent" id="export-card" hidden>
+      <h2>4 · Export GPX</h2>
+      <div class="field">
+        <label for="route-name">Route name</label>
+        <input type="text" id="route-name" maxlength="90" placeholder="Morning loop">
+      </div>
+      <div class="field">
+        <label for="device-select">Target device</label>
+        <select id="device-select"></select>
+        <p class="muted small" id="device-blurb"></p>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="opt-climbs" checked> Climb waypoints (start &amp; summit)</label>
+        <label><input type="checkbox" id="opt-waypoints" checked> My waypoints</label>
+        <label><input type="checkbox" id="opt-route"> Also write a &lt;rte&gt; route block</label>
+        <label><input type="checkbox" id="opt-time"> Virtual timestamps (pace target)</label>
+      </div>
+      <button type="button" id="download-btn" class="btn primary full">Download GPX</button>
+      <p class="muted small" id="export-note"></p>
+    </section>
+
+    <footer class="panel-footer">
+      <p class="muted small">Map data &copy; OpenStreetMap contributors. Elevation from Copernicus
+        DEM / SRTM. Routing by OpenRouteService, BRouter or FOSSGIS OSRM.</p>
+    </footer>
+  </aside>
+
+  <!-- ============ right side ============ -->
+  <section class="stage">
+    <div id="map" class="map"></div>
+    <div class="profile-wrap">
+      <div class="profile-head">
+        <span id="profile-title">Elevation profile</span>
+        <span class="muted small" id="profile-readout"></span>
+      </div>
+      <canvas id="profile" class="profile"></canvas>
+    </div>
+  </section>
+</main>
+
+<!-- ============ settings dialog ============ -->
+<dialog id="settings-dialog" class="dialog">
+  <form method="dialog">
+    <h2>Settings</h2>
+
+    <div class="field">
+      <label for="ors-key">OpenRouteService API key</label>
+      <input type="password" id="ors-key" autocomplete="off" spellcheck="false"
+             placeholder="Paste key to unlock the best cycling profiles">
+      <p class="muted small">Free at <span class="link-literal">openrouteservice.org/dev/#/signup</span> —
+        2 000 routes/day, and it is the only engine that returns surface data with the route.
+        Stored only in this browser.</p>
+    </div>
+
+    <div class="field">
+      <label for="elev-provider">Elevation source</label>
+      <select id="elev-provider">
+        <option value="openmeteo">Open-Meteo — Copernicus DEM (90 m)</option>
+        <option value="opentopo">OpenTopoData — SRTM/ASTER (30 m)</option>
+      </select>
+      <p class="muted small">Used when the routing engine does not supply elevation itself.</p>
+    </div>
+
+    <h3>Analysis tuning</h3>
+    <div class="grid2">
+      <div class="field">
+        <label for="set-smooth">Elevation smoothing (m)</label>
+        <input type="number" id="set-smooth" min="0" max="500" step="5">
+      </div>
+      <div class="field">
+        <label for="set-threshold">Ascent threshold (m)</label>
+        <input type="number" id="set-threshold" min="0" max="30" step="0.5">
+      </div>
+      <div class="field">
+        <label for="set-mingain">Min climb gain (m)</label>
+        <input type="number" id="set-mingain" min="5" max="500" step="5">
+      </div>
+      <div class="field">
+        <label for="set-mingrade">Min climb gradient (%)</label>
+        <input type="number" id="set-mingrade" min="0.5" max="15" step="0.1">
+      </div>
+    </div>
+    <p class="muted small">Raising the ascent threshold discards more DEM noise. 3&nbsp;m matches what
+      Strava and Garmin report; 0&nbsp;m gives the raw, over-counted figure.</p>
+
+    <div class="row end">
+      <button type="button" id="settings-reset" class="btn small">Reset to defaults</button>
+      <button value="close" class="btn primary">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="alert" hidden></div>
+
+<script src="vendor/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

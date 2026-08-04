@@ -1,0 +1,21 @@
+node_modules/
+npm-debug.log*
+*.tgz
+
+# Local Claude Code settings — machine-specific, not part of the project
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Anything exported while testing
+*.gpx
+!examples/*.gpx

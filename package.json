@@ -1,0 +1,28 @@
+{
+  "name": "gpx-forge",
+  "version": "1.0.0",
+  "description": "Build cycling-computer-ready GPX files from Google Maps, Apple Maps or any map link, with elevation profile, categorized climbs, gradient and surface analysis.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "gpx",
+    "cycling",
+    "garmin",
+    "wahoo",
+    "elevation",
+    "route"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1",
+    "leaflet": "^1.9.4"
+  },
+  "private": true
+}
