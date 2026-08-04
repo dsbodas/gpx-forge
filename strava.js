@@ -37,8 +37,14 @@ function loadConfig() {
 
   try {
     const file = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    if (file.clientId && file.clientSecret) {
-      return { clientId: String(file.clientId), clientSecret: String(file.clientSecret) };
+    const id = String(file.clientId || '');
+    const secret = String(file.clientSecret || '');
+    // Treat an unfilled template as "not configured". Otherwise the app would
+    // claim to be set up and then fail deep inside the OAuth round trip, which
+    // is a much harder thing to debug than a clear "not configured yet".
+    const isPlaceholder = (v) => !v || /^(paste|your|xxx|<|1234)/i.test(v);
+    if (!isPlaceholder(id) && !isPlaceholder(secret)) {
+      return { clientId: id, clientSecret: secret };
     }
   } catch { /* not configured */ }
   return null;
