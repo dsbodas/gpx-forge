@@ -293,7 +293,8 @@ async function routeDirect(waypoints) {
       points.push({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t });
     }
   }
-  points.push({ lat: waypoints.at(-1).lat, lon: waypoints.at(-1).lon });
+  const last = waypoints[waypoints.length - 1];
+  points.push({ lat: last.lat, lon: last.lon });
   return { points, hasElevation: false, extras: null };
 }
 

@@ -12,12 +12,19 @@ let serverAvailable = null;
 
 export async function detectServer() {
   if (serverAvailable !== null) return serverAvailable;
+  // AbortController rather than AbortSignal.timeout(), which Safari only gained
+  // in 16. The fallback path would work either way, but a probe that throws on
+  // older browsers is a needless thing to reason about.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
   try {
-    const res = await fetch('/api/health', { signal: AbortSignal.timeout(3000) });
+    const res = await fetch('/api/health', { signal: controller.signal });
     const json = await res.json();
     serverAvailable = json?.service === 'gpx-forge';
   } catch {
     serverAvailable = false;
+  } finally {
+    clearTimeout(timer);
   }
   return serverAvailable;
 }
