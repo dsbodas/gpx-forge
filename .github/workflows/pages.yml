@@ -29,11 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `enablement` turns Pages on via the API if it is not already enabled,
-      # so there is no manual visit to Settings → Pages after the first push.
+      # Pages must already be switched on for this repository, with
+      # Settings → Pages → Build and deployment → Source set to "GitHub Actions".
+      # (configure-pages has an `enablement: true` option that tries to do this
+      # over the API, but creating a Pages site needs admin rights the workflow
+      # token does not carry, so it just fails the run instead.)
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
